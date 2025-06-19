@@ -1,6 +1,5 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TextComponent, TFile, TFolder, Vault } from 'obsidian';
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, Vault } from 'obsidian';
 import { NPC } from './npc'
-import { text } from 'stream/consumers';
 // Remember to rename these classes and interfaces!
 
 interface RandomNPCSettings {
@@ -22,9 +21,8 @@ export default class MyPlugin extends Plugin {
 		const ribbonIconEl = this.addRibbonIcon('dice', 'Generate random NPC', async (evt: MouseEvent) => {
 			// For each npc property get folder or results
 			// const raceOptions = await this.getOptions(this.settings.racePath);
-			const npcFile = await this.generateNPCFile();
 			
-			new Notice('Created new NPC: ' + npcFile?.basename);
+			new Notice('Created new NPC: ');
 
 		});
 
@@ -35,7 +33,9 @@ export default class MyPlugin extends Plugin {
 			id: 'generate-new-npc',
 			name: 'Generate new NPC',
 			callback: async () => {
-				this.generateNPCFile();
+				new NPCModal(this.app, this.settings.properties, (newNPC) => {
+					this.generateNPCFile(newNPC)
+				}).open();
 			},
 		});
 
@@ -70,7 +70,7 @@ export default class MyPlugin extends Plugin {
 	}
 
 
-	async getOptions(path: string) {
+	async getOptions(path: string): Promise<string[]> {
 		let npcOptions: string [] = [];
 
 		// Get the folder of file at the given path
@@ -96,21 +96,48 @@ export default class MyPlugin extends Plugin {
 		return npcOptions;
 	}
 
-	async generateNPCFile(): Promise<TFile | null> {
+	async getRandomElement<T>(array: T[]): Promise<T | undefined> {
+		if (array.length === 0) return undefined;
+		const randomIndex = Math.floor(Math.random() * array.length);
+		return array[randomIndex];
+	}
+	
+	async generateNPCFile(npc: NPC): Promise<TFile | null> {
 		try {
-			const npc = new NPC(
-				{
-					'race': 'human'
+			// Go throught properties and generate random data for empty properties from the modal
+			for (const [propertyKey, propertyValue] of Object.entries(npc.properties)) {
+				console.log('key: ', propertyKey);
+				console.log('value: ', propertyValue);
+				// Only empty properties are randomly generated
+				if (!propertyValue) {
+					const options: string[] = await this.getOptions(this.settings.properties[propertyKey]);
+					const chosen = await this.getRandomElement(options);
+					if (chosen) {
+						console.log("chosen: ", chosen)
+						console.log('npcPropKey: ', npc.properties[propertyKey])
+						npc.properties[propertyKey] = chosen as string;
+						console.log("npcVal: ", npc.properties[propertyKey])
+					} else {
+						console.log("no options found for ", propertyKey);
+					}
 				}
-				// ["Adam", "Kyle", "Doug"], // Names
-				// await this.getOptions(this.settings.racePath), // Race
-			);
-			console.log('Race (raw):', npc.race);
-			console.log('Race (JSON):', JSON.stringify(npc.race));
+				
+			};
+
+			console.log("npcVal2: ", npc.properties['profession'])
+			console.log('NPC props pre-write: ', npc.properties);
+			// Determine filename
+			let fileName = '';
+			if (npc.name) fileName = npc.name; // The the npc has a name use that
+			else fileName = 'new_npc'
+
+			// Create File
 			const npcFile = await this.app.vault.create(
-				this.settings.npcPath+`/${npc.name}.md`,
+				this.settings.npcPath+`/${fileName}.md`,
 				npc.getContent()
 			)
+
+			// Optional opening of file
 			// await this.app.workspace.getLeaf().openFile(npcFile);
 			// this.app.workspace.activeEditor?.editor?.setCursor({ line: 10, ch: 0});
 			return npcFile;
@@ -122,19 +149,46 @@ export default class MyPlugin extends Plugin {
 	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
+// New modal that allows user to specify certain properties of the note
+class NPCModal extends Modal {
+	constructor(app: App, properties: Record<string, string>, onSubmit: (npc: NPC) => void) {
 		super(app);
-	}
+		this.setTitle('New NPC');
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
+		// Create new npc object
+		const npc = new NPC();
+			
+		// NPC name input
+		new Setting(this.contentEl)
+			.setName('Name')
+			.addText((text) =>
+				text.onChange((value) => {
+					npc.name = value;
+				}));
 
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
+		// Make a input for each property
+		Object.keys(properties).forEach(propertyKey => {
+			npc.properties[propertyKey] = ''; // Make property default
+			new Setting(this.contentEl)
+				.setName(propertyKey)
+				.setDesc('Enter value or leave blank for random')
+				.addText(text => text
+					.setPlaceholder('Enter value')
+					.onChange(async (newValue: string) => {
+						npc.properties[propertyKey] = newValue;
+					}))
+		});
+
+		// Submit Button
+		new Setting(this.contentEl)
+			.addButton((btn) =>
+				btn
+				.setButtonText('Submit')
+				.setCta()
+				.onClick(() => {
+					this.close();
+					onSubmit(npc);
+				}));
 	}
 }
 
@@ -150,8 +204,7 @@ class SampleSettingTab extends PluginSettingTab {
 		const {containerEl} = this;
 
 		containerEl.empty();
-		console.log("properties: ", this.plugin.settings.properties);
-		
+		// console.log("properties: ", this.plugin.settings.properties);
 		
 		new Setting(containerEl)
 			.setName("NPC Folder")
@@ -164,64 +217,23 @@ class SampleSettingTab extends PluginSettingTab {
 					this.plugin.settings.npcPath = value;
 					await this.plugin.saveSettings();
 				}));
-		// type SettingEntry = {
-		// 	name: string;
-		// 	description: string;
-		// 	placeholder: string;
-		// 	settingsKey: keyof RandomNPCSettings;
-		// };
-		
-		// // const settings: SettingEntry[] = [
-		// // 	{
-		// // 		name: "NPC Folder",
-		// // 		description: "Specify a folder to store new NPCs.",
-		// // 		placeholder: 'Specify file or folder',
-		// // 		settingsKey: 'npcPath'
-		// // 	},
-		// // 	{
-		// // 		name: "Race Folder",
-		// // 		description: 'Specify a folder with your NPC races.',
-		// // 		placeholder: 'Specify file or folder',
-		// // 		settingsKey: 'racePath'
-		// // 	},
-		// // 	{
-		// // 		name: 'Profession',
-		// // 		description: 'Specify a folder with your NPC professions.',
-		// // 		placeholder: 'Specify a file or folder',
-		// // 		settingsKey: 'professionPath'
-		// // 	}
-		// // ]
 
-		// for (const setting of settings) {
-		// 	new Setting(containerEl)
-		// 		.setName(setting.name)
-		// 		.setDesc(setting.description)
-		// 		.addText(text => text
-		// 			.setPlaceholder(setting.placeholder)
-		// 			.setValue(this.plugin.settings[setting.settingsKey])
-		// 			.onChange(async (value) => {
-		// 				this.plugin.settings[setting.settingsKey] = value;
-		// 				await this.plugin.saveSettings();
-		// 			}));
-		// }
-		// const propertiesContainer = containerEl.createDiv(cls: 'setting')
-
+		// Dynamic settings
 		let newPropertyName = '';
-		let textComponent: TextComponent | null = null;
 		new Setting(containerEl)
 			.setName("Add NPC Property")
 			.setDesc("Add a new property to NPC generation")
 			// Input for name of new property
 			.addText(text => text
+				.setPlaceholder('Property name')
 				.onChange((name) => {
-					textComponent = text;
 					newPropertyName = name;
 				})
 			)
 			.addButton(button => button
 				.setButtonText('New Property')
 				// .setCta()
-				.onClick((async () => {
+				.onClick(( async () => {
 					// Check if property has been named
 					if (!newPropertyName) {
 						new Notice("Please enter a property name first.");
@@ -233,40 +245,43 @@ class SampleSettingTab extends PluginSettingTab {
 						new Notice(`Property "${newPropertyName}" already exists.`);
 						return;
 					}
-
-					// Create new setting element
-					new Setting(containerEl)
-						.setName(newPropertyName)
-						.addText(text => text
-							.setPlaceholder('Specify a file or folder')
-							.onChange(async (value) => {
-								if (value) {
-									this.plugin.settings.properties[newPropertyName] = value;
-									await this.plugin.saveSettings();
-								}
-							}));
-					// Initalize new property and save it
-					this.plugin.settings.properties[newPropertyName] = '';
-					await this.plugin.saveSettings();
-					// Reset input
-					if (textComponent) {
-						textComponent.setValue('');
-					}
-					newPropertyName = ''; // reset name
+						
+					this.plugin.settings.properties[newPropertyName] = ''; // Add new property to settings list
+					await this.plugin.saveSettings(); // Save settings
+					// newPropertyName = ''; // reset name
+					this.display(); // Reload settings tab
 				}))
 			)
 
 		// Display existing properties
 		Object.entries(this.plugin.settings.properties).forEach(([name, value]) => {
+			// Each property is a new setting
 			new Setting(containerEl)
 				.setName(name)
+				.addDropdown(dropdown => dropdown
+					.addOptions({
+						'folder': 'Folder',
+						'file': 'File'
+					})
+					.onChange(async (value) => {
+						this.plugin.settings.properties
+					}))
 				.addText(text => text
+					.setPlaceholder('Specify a file or folder')
 					.setValue(value)
 					.onChange(async (newValue) => {
 						this.plugin.settings.properties[name] = newValue;
 						await this.plugin.saveSettings();
-					}));
+					}))
+				// Delete button
+				.addButton(button => button
+					.setButtonText('x')
+					.onClick(( async () => {
+						delete this.plugin.settings.properties[name];
+						await this.plugin.saveSettings();
+						this.display();
+					}))
+				)
 		});
 	}
 }
-
