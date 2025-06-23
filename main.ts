@@ -1,5 +1,5 @@
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, Vault } from 'obsidian';
-import { NPC } from './npc'
+import { NPC } from './npc';
 // Remember to rename these classes and interfaces!
 
 interface RandomNPCSettings {
@@ -19,11 +19,9 @@ export default class MyPlugin extends Plugin {
 
 		// This creates an icon in the left ribbon.
 		const ribbonIconEl = this.addRibbonIcon('dice', 'Generate random NPC', async (evt: MouseEvent) => {
-			// For each npc property get folder or results
-			// const raceOptions = await this.getOptions(this.settings.racePath);
-			
-			new Notice('Created new NPC: ');
-
+			new NPCModal(this.app, this.settings.properties, (newNPC) => {
+				this.generateNPCFile(newNPC)
+			}).open();
 		});
 
 		// Perform additional things with the ribbon
@@ -74,12 +72,20 @@ export default class MyPlugin extends Plugin {
 		let npcOptions: string [] = [];
 
 		// Get the folder of file at the given path
-		const abstractFile = this.app.vault.getAbstractFileByPath(path);
+		let abstractFile = this.app.vault.getAbstractFileByPath(path);
 		
+		// If it's not found and doesn't end in .md, try adding .md
+		if (!abstractFile && !path.endsWith('.md')) {
+			abstractFile = this.app.vault.getAbstractFileByPath(path + '.md');
+		}
+
+		// Check if the path is for a file or folder
 		if (abstractFile instanceof TFile) {
 			console.log('It\'s a file at ', path);
-			// TODO: Get each option from the given file
-			// vault.cachedRead(racePath)
+			// Read Content
+			const content = await this.app.vault.read(abstractFile);
+			// Get an option for each line in the file
+			npcOptions = content.split('\n').map(line => line.trim()).filter(Boolean);
 		} else if (abstractFile instanceof TFolder) {
 			// Return a list of all files from given folder path
 			const files = this.getAllFilesInFolder(abstractFile);
@@ -91,7 +97,8 @@ export default class MyPlugin extends Plugin {
 				// NOTE: note link is created in getContent() class function.
 			});
 		} else {
-			console.log('Not a valid path');
+			console.log('Not a valid path: ' + path)
+			new Notice('Not a valid path: ' + path);
 		}
 		return npcOptions;
 	}
@@ -106,17 +113,12 @@ export default class MyPlugin extends Plugin {
 		try {
 			// Go throught properties and generate random data for empty properties from the modal
 			for (const [propertyKey, propertyValue] of Object.entries(npc.properties)) {
-				console.log('key: ', propertyKey);
-				console.log('value: ', propertyValue);
 				// Only empty properties are randomly generated
 				if (!propertyValue) {
 					const options: string[] = await this.getOptions(this.settings.properties[propertyKey]);
 					const chosen = await this.getRandomElement(options);
 					if (chosen) {
-						console.log("chosen: ", chosen)
-						console.log('npcPropKey: ', npc.properties[propertyKey])
 						npc.properties[propertyKey] = chosen as string;
-						console.log("npcVal: ", npc.properties[propertyKey])
 					} else {
 						console.log("no options found for ", propertyKey);
 					}
@@ -124,8 +126,6 @@ export default class MyPlugin extends Plugin {
 				
 			};
 
-			console.log("npcVal2: ", npc.properties['profession'])
-			console.log('NPC props pre-write: ', npc.properties);
 			// Determine filename
 			let fileName = '';
 			if (npc.name) fileName = npc.name; // The the npc has a name use that
@@ -169,9 +169,25 @@ class NPCModal extends Modal {
 		// Make a input for each property
 		Object.keys(properties).forEach(propertyKey => {
 			npc.properties[propertyKey] = ''; // Make property default
+			npc.outputTypes[propertyKey] = 'text';
 			new Setting(this.contentEl)
 				.setName(propertyKey)
-				.setDesc('Enter value or leave blank for random')
+				.setDesc('Enter value or leave blank for random. Then set property type in the dropdown.')
+				.addDropdown(dropdown => dropdown
+					.setValue(npc.outputTypes[propertyKey])
+					.addOptions({
+						'text': 'Text',
+						'link': 'Link',
+						'list': 'List',
+						'number': 'Number',
+						'checkbox': 'Checkbox',
+						'date': 'Date',
+						'dateTime': 'Date and Time'
+					})
+
+					.onChange(async (value) => {
+						npc.outputTypes[propertyKey] = value;
+					}))
 				.addText(text => text
 					.setPlaceholder('Enter value')
 					.onChange(async (newValue: string) => {
@@ -183,7 +199,7 @@ class NPCModal extends Modal {
 		new Setting(this.contentEl)
 			.addButton((btn) =>
 				btn
-				.setButtonText('Submit')
+				.setButtonText('Create')
 				.setCta()
 				.onClick(() => {
 					this.close();
@@ -264,7 +280,7 @@ class SampleSettingTab extends PluginSettingTab {
 						'file': 'File'
 					})
 					.onChange(async (value) => {
-						this.plugin.settings.properties
+						console.log(value);
 					}))
 				.addText(text => text
 					.setPlaceholder('Specify a file or folder')
