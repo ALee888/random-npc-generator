@@ -1,16 +1,19 @@
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, Vault } from 'obsidian';
-import { NPC } from './npc';
+import { NPC, PropertyObject } from './npc';
 // Remember to rename these classes and interfaces!
+
 
 interface RandomNPCSettings {
 	npcPath: string;
-	properties: Record<string, string>;
+	properties: Record<string, PropertyObject>;
 }
 
 const DEFAULT_SETTINGS: RandomNPCSettings = {
 	npcPath: '',
 	properties: {}
 }
+
+const DEFAULT_PROPERTY: PropertyObject = {value: null, source: '', type: ''};
 
 export default class MyPlugin extends Plugin {
 	settings: RandomNPCSettings;
@@ -112,18 +115,17 @@ export default class MyPlugin extends Plugin {
 	async generateNPCFile(npc: NPC): Promise<TFile | null> {
 		try {
 			// Go throught properties and generate random data for empty properties from the modal
-			for (const [propertyKey, propertyValue] of Object.entries(npc.properties)) {
+			for (const [propertyKey, propertyObject] of Object.entries(npc.properties)) {
 				// Only empty properties are randomly generated
-				if (!propertyValue) {
-					const options: string[] = await this.getOptions(this.settings.properties[propertyKey]);
+				if (propertyObject.value === null) {
+					const options: string[] = await this.getOptions(propertyObject.source);
 					const chosen = await this.getRandomElement(options);
 					if (chosen) {
-						npc.properties[propertyKey] = chosen as string;
+						npc.properties[propertyKey].value = chosen; // Set property value to chosen element
 					} else {
 						console.log("no options found for ", propertyKey);
 					}
 				}
-				
 			};
 
 			// Determine filename
@@ -151,13 +153,13 @@ export default class MyPlugin extends Plugin {
 
 // New modal that allows user to specify certain properties of the note
 class NPCModal extends Modal {
-	constructor(app: App, properties: Record<string, string>, onSubmit: (npc: NPC) => void) {
+	constructor(app: App, properties: Record<string, PropertyObject>, onSubmit: (npc: NPC) => void) {
 		super(app);
 		this.setTitle('New NPC');
 
 		// Create new npc object
-		const npc = new NPC();
-			
+		const npc = new NPC(properties);
+		console.log(properties);
 		// NPC name input
 		new Setting(this.contentEl)
 			.setName('Name')
@@ -168,30 +170,39 @@ class NPCModal extends Modal {
 
 		// Make a input for each property
 		Object.keys(properties).forEach(propertyKey => {
-			npc.properties[propertyKey] = ''; // Make property default
-			npc.outputTypes[propertyKey] = 'text';
+			const propertyType = npc.properties[propertyKey].type;
+			const placeholders: Record<string, string> = {
+				'text': 'Enter value',
+				'link': 'Enter value',
+				'list': 'Enter comma separated values',
+				'number': 'Enter number',
+				'checkbox': 'Enter true or false',
+				'date': 'Enter date (YYYY-MM-DD)',
+				'dateTime': 'Enter date with time (YYYY-MM-DD HH:MM:SS)'
+			}
+
 			new Setting(this.contentEl)
 				.setName(propertyKey)
 				.setDesc('Enter value or leave blank for random. Then set property type in the dropdown.')
-				.addDropdown(dropdown => dropdown
-					.setValue(npc.outputTypes[propertyKey])
-					.addOptions({
-						'text': 'Text',
-						'link': 'Link',
-						'list': 'List',
-						'number': 'Number',
-						'checkbox': 'Checkbox',
-						'date': 'Date',
-						'dateTime': 'Date and Time'
-					})
+				// .addDropdown(dropdown => dropdown
+				// 	.setValue(npc.outputTypes[propertyKey])
+				// 	.addOptions({
+				// 		'text': 'Text',
+				// 		'link': 'Link',
+				// 		'list': 'List',
+				// 		'number': 'Number',
+				// 		'checkbox': 'Checkbox',
+				// 		'date': 'Date',
+				// 		'dateTime': 'Date and Time'
+				// 	})
 
-					.onChange(async (value) => {
-						npc.outputTypes[propertyKey] = value;
-					}))
-				.addText(text => text
-					.setPlaceholder('Enter value')
+				// 	.onChange(async (value) => {
+				// 		npc.outputTypes[propertyKey] = value;
+				// 	}))
+				.addText(value => value
+					.setPlaceholder(placeholders[propertyType])
 					.onChange(async (newValue: string) => {
-						npc.properties[propertyKey] = newValue;
+						npc.properties[propertyKey].value = newValue;
 					}))
 		});
 
@@ -261,39 +272,55 @@ class SampleSettingTab extends PluginSettingTab {
 						new Notice(`Property "${newPropertyName}" already exists.`);
 						return;
 					}
-						
-					this.plugin.settings.properties[newPropertyName] = ''; // Add new property to settings list
+
+					// Add new property
+					this.plugin.settings.properties[newPropertyName] = {value: null, source: '', type: 'text'}; // Create settings object
 					await this.plugin.saveSettings(); // Save settings
-					// newPropertyName = ''; // reset name
 					this.display(); // Reload settings tab
 				}))
 			)
 
 		// Display existing properties
-		Object.entries(this.plugin.settings.properties).forEach(([name, value]) => {
+		Object.entries(this.plugin.settings.properties).forEach(([propertyName, propertyValue]) => {
+			console.log("key: ", propertyName, ' / val: ', propertyValue.type)
 			// Each property is a new setting
 			new Setting(containerEl)
-				.setName(name)
-				.addDropdown(dropdown => dropdown
+				.setName(propertyName)
+				// .addDropdown(dropdown => dropdown
+				// 	.addOptions({
+				// 		'folder': 'Folder',
+				// 		'file': 'File'
+				// 	})
+				// 	.onChange(async (value) => {
+				// 		console.log(value);
+				// 	}))
+				.addDropdown(propertyTypes => propertyTypes
 					.addOptions({
-						'folder': 'Folder',
-						'file': 'File'
+						'text': 'Text',
+						'link': 'Link',
+						'list': 'List',
+						'number': 'Number',
+						'checkbox': 'Checkbox',
+						'date': 'Date',
+						'dateTime': 'Date and Time'
 					})
-					.onChange(async (value) => {
-						console.log(value);
+					.setValue(propertyValue.type)
+					.onChange(async (propType) => {
+						this.plugin.settings.properties[propertyName].type = propType;
+						await this.plugin.saveSettings();
 					}))
-				.addText(text => text
+				.addText(source => source
 					.setPlaceholder('Specify a file or folder')
-					.setValue(value)
-					.onChange(async (newValue) => {
-						this.plugin.settings.properties[name] = newValue;
+					.setValue(propertyValue.source)
+					.onChange(async (newSource) => {
+						this.plugin.settings.properties[propertyName].source = newSource;
 						await this.plugin.saveSettings();
 					}))
 				// Delete button
 				.addButton(button => button
 					.setButtonText('x')
 					.onClick(( async () => {
-						delete this.plugin.settings.properties[name];
+						delete this.plugin.settings.properties[propertyName];
 						await this.plugin.saveSettings();
 						this.display();
 					}))

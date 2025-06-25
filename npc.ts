@@ -1,52 +1,85 @@
+type valueType = string | number | any[] | Date | boolean | null;
+
+export interface PropertyObject {
+	value: valueType;
+	source: string;
+	type: string;
+}
+
 export class NPC {
 	name: string;
-    properties: Record<string, string>
-	outputTypes: Record<string, string>
-	constructor(properties: Record<string, string> = {}, outputTypes: Record<string, string> = {}) {
+    properties: Record<string, PropertyObject>
+	// outputTypes: Record<string, string>
+	constructor(properties: Record<string, PropertyObject> = {}) {
 		this.properties = properties;
-		this.outputTypes = outputTypes
 	}
 	
+	formatDate(dateStr: Date, includeTime: boolean = false): String {
+		console.log(dateStr);
+		const year = dateStr.getFullYear();
+		const month = String(dateStr.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+		const day = String(dateStr.getDate()).padStart(2, '0');
+
+		console.log("format: ", year, '-', month, '-', day)
+		if (includeTime) {
+			return `${year}-${month}-${day}`
+		} else {
+			return `${year}-${month}-${day}T`;
+		}
+	}
+
 	getContent() {
-		console.log('properties: ', this.properties);
-		console.log('outputTypes: ', this.outputTypes);
 		let frontmatter: Record<string, any> = {};
-		for (const [propertyKey, propertyVal] of Object.entries(this.properties)) {
-			const type = this.outputTypes[propertyKey];
+		for (const [propertyKey, propertyObj] of Object.entries(this.properties)) {
+			const value = this.properties[propertyKey].value;
+			const type = this.properties[propertyKey].type;
+		
 			if (type=='text') {
-				frontmatter[propertyKey] = propertyVal;
+				frontmatter[propertyKey] = value;
 			} else if (type == 'link') {
 				console.log(propertyKey, ' is a list!')
-				frontmatter[propertyKey] = `[[${propertyVal}]]`;
+				frontmatter[propertyKey] = `[[${value}]]`;
 				// NOTE: if link or folder is specified earlier, the brackets "[[]]" could already be added
 				// in which case just make this a part of text
 			} else if (type == 'list') {
-				frontmatter[propertyKey] = [propertyVal];
+				console.log(value)
+				frontmatter[propertyKey] = [value];
 			} else if (type == 'number') {
-				if (Number(propertyVal)) {
+				if (Number(value)) {
 					console.log(propertyKey, ' is a valid number!')
-					frontmatter[propertyKey] = Number(propertyVal)
+					frontmatter[propertyKey] = Number(value)
 				} else {
 					console.log(propertyKey, ' is not a valid number!')
+					frontmatter[propertyKey] = Number(value)
 				}
 			} else if (type == 'checkbox') {
-				if (Boolean(propertyVal)) {
+				if (Boolean(value)) {
 					console.log(propertyKey, ' is a valid boolean!')
-					frontmatter[propertyKey] = Boolean(propertyVal);
+					frontmatter[propertyKey] = Boolean(value);
 				} else {
 					console.log(propertyKey, ' is not a valid boolean!');
+					frontmatter[propertyKey] = false;
 				}
-			} else if (type == 'date') {
-				const date = new Date(propertyVal)
-				if (isNaN(date.getTime())) {
-					console.log(propertyKey, " is not a valid date!");
+			} else if (type == 'date' || type == 'dateTime') {
+				if (typeof value === 'string' || value instanceof Date || typeof value === 'number') {
+					const date = new Date(value);
+					if (isNaN(date.getTime())) {
+						console.log(propertyKey, " is not a valid date!");
+					} else {
+						console.log(propertyKey, ' is a valid date');
+						if (type === 'date') {
+							frontmatter[propertyKey] = this.formatDate(date);
+						} else {
+							frontmatter[propertyKey] = date;
+						}
+					}
 				} else {
-					console.log(propertyKey, ' is a valid date');
-					frontmatter[propertyKey] = date;
+					console.log(propertyKey, ' is not a string/date/number, so not a valid date input');
 				}
 			} else {
 				console.log('ERROR: no valid type specified: ', propertyKey);
 			}
+			
 			// Add tags
 			frontmatter['tags'] = ['npc'];
 		}
